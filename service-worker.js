@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'today-planner-v2.0.0';
+const CACHE_VERSION = 'today-planner-v3.0.0';
 const APP_SHELL = [
   './',
   './index.html',

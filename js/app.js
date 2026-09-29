@@ -670,21 +670,50 @@
     window.scrollTo({ top:0, behavior:'smooth' });
   }
 
+  function profileInitials(profile) {
+    const initials = profile.name ? profile.name.trim().slice(-2).toUpperCase() : 'PB';
+    return initials === '병관' ? 'PB' : initials;
+  }
+
   function renderProfileButtons() {
     const profile = S.getProfile();
-    const initials = profile.name ? profile.name.trim().slice(-2).toUpperCase() : 'PB';
-    els.profileButtons.forEach(button => { const span = button.querySelector('span'); if (span) span.textContent = initials === '병관' ? 'PB' : initials; });
+    els.profileButtons.forEach(button => {
+      button.replaceChildren();
+      if (profile.photo) {
+        const img = document.createElement('img');
+        img.src = profile.photo;
+        img.alt = '';
+        img.decoding = 'async';
+        button.appendChild(img);
+        button.classList.add('has-photo');
+      } else {
+        const span = document.createElement('span');
+        span.textContent = profileInitials(profile);
+        button.appendChild(span);
+        button.classList.remove('has-photo');
+      }
+    });
+  }
+
+  function profileAvatarMarkup(profile) {
+    if (profile.photo) {
+      return `<div class="profile-avatar profile-avatar--photo"><img src="${escapeAttr(profile.photo)}" alt="${escapeAttr(profile.name)} 프로필 사진"></div>`;
+    }
+    return `<div class="profile-avatar">${escapeHtml(profileInitials(profile))}</div>`;
   }
 
   function openProfile() {
     const profile = S.getProfile();
     const settings = S.getSettings();
     openModal('프로필 · 설정', `
-      <div class="profile-hero"><div class="profile-avatar">PB</div><div><h3>${escapeHtml(profile.name)}</h3><p>${profile.age}세 · ${escapeHtml(profile.status)}</p></div></div>
+      <div class="profile-hero">${profileAvatarMarkup(profile)}<div><h3>${escapeHtml(profile.name)}</h3><p>${profile.age}세 · ${escapeHtml(profile.status)}</p></div></div>
+      <div class="settings-group"><h4>프로필 사진</h4><div class="data-actions"><button type="button" data-setting="photo">${profile.photo ? '사진 변경' : '사진 보관함에서 선택'}</button>${profile.photo ? '<button type="button" data-setting="photo-remove" class="danger">사진 삭제 · PB로 되돌리기</button>' : ''}</div><p class="settings-help">iPhone에서는 사진 보관함에서 원하는 이미지를 고를 수 있어요. 선택한 사진은 앱 안에서 작게 압축해 저장됩니다.</p></div>
       <div class="settings-group"><h4>개인화</h4><div class="data-actions"><button type="button" data-setting="profile">이름 · 상태 문구 수정</button></div></div>
       <div class="settings-group"><h4>테마</h4><div class="segmented">${['system','light','dark'].map(theme => `<button type="button" data-theme-choice="${theme}" class="${settings.theme === theme ? 'is-active' : ''}">${theme === 'system' ? '시스템' : theme === 'light' ? '라이트' : '다크'}</button>`).join('')}</div></div>
       <div class="settings-group"><h4>데이터 관리</h4><div class="data-actions"><button type="button" data-setting="export">데이터 백업 내보내기</button><button type="button" data-setting="import">백업 데이터 가져오기</button><button type="button" data-setting="reset" class="danger">앱 데이터 전체 초기화</button></div></div>`, []);
 
+    els.modalBody.querySelector('[data-setting="photo"]').addEventListener('click', chooseProfilePhoto);
+    els.modalBody.querySelector('[data-setting="photo-remove"]')?.addEventListener('click', removeProfilePhoto);
     els.modalBody.querySelector('[data-setting="profile"]').addEventListener('click', openProfileEditor);
     els.modalBody.querySelectorAll('[data-theme-choice]').forEach(button => button.addEventListener('click', () => {
       const theme = button.dataset.themeChoice; S.setTheme(theme); applyTheme(theme); openProfile();
@@ -692,6 +721,75 @@
     els.modalBody.querySelector('[data-setting="export"]').addEventListener('click', exportBackup);
     els.modalBody.querySelector('[data-setting="import"]').addEventListener('click', openImportBackup);
     els.modalBody.querySelector('[data-setting="reset"]').addEventListener('click', confirmResetAll);
+  }
+
+  function chooseProfilePhoto() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.setAttribute('aria-label', '프로필 사진 선택');
+    input.style.position = 'fixed';
+    input.style.left = '-9999px';
+    document.body.appendChild(input);
+    input.addEventListener('change', async () => {
+      const file = input.files?.[0];
+      input.remove();
+      if (!file) return;
+      if (!file.type.startsWith('image/')) { showToast('이미지 파일을 선택해주세요.'); return; }
+      try {
+        showToast('프로필 사진을 준비하고 있어요.');
+        const photo = await cropAndCompressProfilePhoto(file);
+        if (!S.setProfile({ photo })) throw new Error('save-failed');
+        renderProfileButtons();
+        openProfile();
+        showToast('프로필 사진을 변경했습니다.');
+      } catch (error) {
+        console.error('프로필 사진 처리 실패', error);
+        showToast('사진을 저장하지 못했습니다. 다른 사진으로 다시 시도해주세요.');
+      }
+    }, { once:true });
+    input.click();
+  }
+
+  function cropAndCompressProfilePhoto(file) {
+    return new Promise((resolve, reject) => {
+      const objectUrl = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const sourceWidth = img.naturalWidth || img.width;
+          const sourceHeight = img.naturalHeight || img.height;
+          if (!sourceWidth || !sourceHeight) throw new Error('invalid-image-size');
+          const side = Math.min(sourceWidth, sourceHeight);
+          const sx = Math.max(0, (sourceWidth - side) / 2);
+          const sy = Math.max(0, (sourceHeight - side) / 2);
+          const canvas = document.createElement('canvas');
+          canvas.width = 320;
+          canvas.height = 320;
+          const context = canvas.getContext('2d', { alpha:false });
+          if (!context) throw new Error('canvas-unavailable');
+          context.fillStyle = '#ffffff';
+          context.fillRect(0, 0, canvas.width, canvas.height);
+          context.drawImage(img, sx, sy, side, side, 0, 0, 320, 320);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.84);
+          if (!dataUrl || dataUrl.length > 650000) throw new Error('image-too-large');
+          resolve(dataUrl);
+        } catch (error) {
+          reject(error);
+        } finally {
+          URL.revokeObjectURL(objectUrl);
+        }
+      };
+      img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('image-load-failed')); };
+      img.src = objectUrl;
+    });
+  }
+
+  function removeProfilePhoto() {
+    S.setProfile({ photo:'' });
+    renderProfileButtons();
+    openProfile();
+    showToast('프로필 사진을 삭제했습니다.');
   }
 
   function openProfileEditor() {

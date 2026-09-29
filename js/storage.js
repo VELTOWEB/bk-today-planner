@@ -3,13 +3,14 @@
 
   const STORAGE_KEY = 'todayPlannerData';
   const BACKUP_KEY = 'todayPlannerDataBackupV1';
-  const SCHEMA_VERSION = 2;
+  const SCHEMA_VERSION = 3;
   const MOODS = ['good', 'normal', 'sad'];
   const DEFAULT_PROFILE = {
     name: '박병관',
     age: 18,
     gender: 'male',
-    status: '오늘도 하나씩 해내는 중.'
+    status: '오늘도 하나씩 해내는 중.',
+    photo: ''
   };
 
   function createId(prefix = 'item') {
@@ -104,11 +105,15 @@
 
   function sanitizeProfile(profile) {
     const safe = profile && typeof profile === 'object' ? profile : {};
+    const photo = typeof safe.photo === 'string' && /^data:image\/(?:jpeg|jpg|png|webp);base64,/i.test(safe.photo) && safe.photo.length <= 650000
+      ? safe.photo
+      : '';
     return {
       name: clampString(safe.name, 30) || DEFAULT_PROFILE.name,
       age: Number.isFinite(Number(safe.age)) ? Math.max(1, Math.min(120, Math.round(Number(safe.age)))) : DEFAULT_PROFILE.age,
       gender: ['male','female','other'].includes(safe.gender) ? safe.gender : DEFAULT_PROFILE.gender,
-      status: clampString(safe.status, 80) || DEFAULT_PROFILE.status
+      status: clampString(safe.status, 80) || DEFAULT_PROFILE.status,
+      photo
     };
   }
 
